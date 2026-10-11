@@ -1,3 +1,17 @@
-users.json
-node_modules/
 .env
+data/
+firmware/**/secrets.h
+.pio/
+*.log
+.build/
+node_modules/
+*.lnk
+*.elf
+*.hex
+*.bin
+*.o
+# Inactive legacy files retained locally for recovery, excluded from this backup.
+/security.js
+/platformio.ini
+/firmware/doppler_radar/
+/firmware/secrets.example.h
