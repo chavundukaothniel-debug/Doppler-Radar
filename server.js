@@ -23,7 +23,7 @@ function hashPassword(password, salt = crypto.randomBytes(16)) {
 }
 
 function createDefaultUsers() {
-  const initialPassword = process.env.DOPPLER_INITIAL_PASSWORD || 'ChangeMe!2026';
+  const initialPassword = process.env.DOPPLER_INITIAL_PASSWORD || 'Kayler@2025';
   return [
     ['usr_admin_001', 'admin', 'Administrator'],
     ['usr_operator_001', 'operator', 'Operator'],
@@ -327,12 +327,12 @@ function createApp(options = {}) {
         user.lastLogin = new Date().toISOString(); store.saveUsers(users);
         const sessionId = crypto.randomBytes(32).toString('base64url');
         sessions.set(sessionId, { userId: user.id, expiresAt: Date.now() + SESSION_TTL_MS });
-        return sendJson(res, 200, { user: publicUser(user) }, { 'Set-Cookie': `doppler_session=${sessionId}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_MS / 1000}` });
+        return sendJson(res, 200, { user: publicUser(user) }, { 'Set-Cookie': `doppler_session=${sessionId}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_MS / 1000}` });
       }
       if (req.method === 'POST' && url.pathname === '/api/auth/logout') {
         const id = (req.headers.cookie || '').match(/doppler_session=([^;]+)/)?.[1];
         if (id) sessions.delete(id);
-        return sendJson(res, 200, { ok: true }, { 'Set-Cookie': 'doppler_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
+        return sendJson(res, 200, { ok: true }, { 'Set-Cookie': 'doppler_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0' });
       }
       if (req.method === 'GET' && url.pathname === '/api/auth/session') {
         const user = sessionUser(req);
