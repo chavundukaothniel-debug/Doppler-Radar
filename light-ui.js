@@ -59,7 +59,7 @@
     const range=state.radarRange;
     const fields=[1,2].map(sensorId=>{
       const sensor=sensors().find(s=>s.id===sensorId);
-      const measured=targets().filter(t=>(t.sensorIds||[t.sensorId]).includes(sensorId));
+      const measured=targets().filter(t=>t.sensorId===sensorId);
       const position=t=>{const p=radarPoint(t,range);return {left:p.x,top:p.y/60*100};};
       const ringCount=range===1?4:range;
       const rings=Array.from({length:ringCount},(_,i)=>{const r=(i+1)*50/ringCount;return `<path class="range" d="M ${50-r*.8660254} ${55-r*.5} A ${r} ${r} 0 0 1 ${50+r*.8660254} ${55-r*.5}"/><text class="range-label" x="51" y="${55-r+2.5}">${n((i+1)*range/ringCount,range===1?2:0)} m</text>`;}).join('');
