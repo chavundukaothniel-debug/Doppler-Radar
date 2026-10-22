@@ -2,6 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { fuseTargets } = require('./target-fusion');
 
 const ROOT = __dirname;
 const MAX_BODY_BYTES = 32 * 1024;
@@ -196,7 +197,7 @@ function normalizeTelemetry(payload, previous, receivedAt) {
     lastData: receivedAt,
     deviceId: safeText(payload.deviceId, previous.deviceId),
     controller: safeText(payload.controller, 'ESP controller'),
-    targets: sensorsWithTargets.flatMap((sensor) => sensor.targets),
+    targets: fuseTargets(sensorsWithTargets.flatMap((sensor) => sensor.targets)),
     sensors: sensorsWithTargets.map(({ targets, ...sensor }) => sensor),
     gsm: {
       connected: Boolean(gsm.connected), network: Boolean(gsm.network), signal: Number(gsm.signal) === 99 ? null : Math.floor(finiteNumber(gsm.signal, 0, 0, 31)),
@@ -286,7 +287,7 @@ function publicTelemetry(state, events) {
     gsm: { ...state.gsm, connected: online && state.gsm.connected, network: online && state.gsm.network },
     sensors: state.sensors.map((sensor) => ({ ...sensor,
       lastFrameAgeMs: sensor.lastFrameAgeMs === null ? null : Math.min(60000, (sensor.lastFrameAgeMs || 0) + age),
-      targetCount: targets.filter(t => t.sensorId === sensor.id).length,
+      targetCount: targets.filter(t => (t.sensorIds || [t.sensorId]).includes(sensor.id)).length,
       online: sensor.mode === 'trigger' ? null : online && sensor.online && (sensor.lastFrameAgeMs || 0) + age < SENSOR_HEALTH_MS,
       linkOnline: sensor.mode === 'linked' ? online && sensor.linkOnline && (sensor.lastFrameAgeMs || 0) + age < SENSOR_HEALTH_MS : sensor.linkOnline,
       triggerActive: online && sensor.triggerActive, detectionActive: online && sensor.detectionActive })),
