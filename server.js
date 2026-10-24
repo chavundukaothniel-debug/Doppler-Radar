@@ -275,11 +275,12 @@ function publicTelemetry(state, events) {
   const online = Boolean(state.lastData && Date.now() - Date.parse(state.lastData) <= HARDWARE_ONLINE_MS);
   const age = state.lastData ? Math.max(0, Date.now() - Date.parse(state.lastData)) : Infinity;
   const targets = online ? state.targets.filter(t => (t.lastSeenAgeMs || 0) + age < (t.displayHoldMs || 1200) &&
-    state.sensors.some(s => (state.sharedScene || s.id === t.sensorId) && s.online && (s.lastFrameAgeMs || 0) + age < SENSOR_HEALTH_MS))
+    state.sensors.some(s => (state.sharedScene || s.id === t.sensorId) && s.online && ((state.sharedScene && t.displayHoldMs===10000) || (s.lastFrameAgeMs || 0) + age < SENSOR_HEALTH_MS)))
     .map(t => {
       const measurementAge = (t.lastSeenAgeMs || 0) + age;
-      return {...t, lastSeenAgeMs:measurementAge, displayState:measurementAge >= 1200 ? 'LAST_KNOWN' : 'LIVE',
-        ...(measurementAge >= 1200 ? {moving:false, alarmQualified:false, direction:'TRACKING'} : {})};
+      const stale=t.displayState==='LAST_KNOWN'||measurementAge>=1200;
+      return {...t, lastSeenAgeMs:measurementAge, displayState:stale ? 'LAST_KNOWN' : 'LIVE',
+        ...(stale ? {moving:false, lateralMoving:false, alarmQualified:false, direction:'TRACKING'} : {})};
     }) : [];
   return {
     ...state,

@@ -14,7 +14,9 @@ test('qualified direction arrows point toward or away from the sensor origin',()
   assert.ok(radius(toward.x2,toward.y2)<radius(toward.x1,toward.y1));
   assert.ok(radius(away.x2,away.y2)>radius(away.x1,away.y1));
   assert.equal(radarVector({...t,moving:false}),null);
-  assert.equal(radarVector({...t,alarmQualified:false}),null);
+  assert.ok(radarVector({...t,alarmQualified:false}));
+  assert.equal(radarVector({...t,displayState:'LAST_KNOWN'}),null);
+  assert.equal(radarVector({...t,lastSeenAgeMs:1500}),null);
   assert.equal(radarVector({...t,direction:'TRACKING'}),null);
   assert.ok(radius(radarVector({...t,x:0,y:6.8,direction:'MOVING AWAY'}).x2,radarVector({...t,x:0,y:6.8,direction:'MOVING AWAY'}).y2)<=49);
 });
