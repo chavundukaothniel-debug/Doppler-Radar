@@ -2,6 +2,7 @@
 #include "../firmware/nodemcu_master/uno_link_receiver.h"
 #include "../firmware/nodemcu_master/gsm_controller.h"
 #include <string.h>
+#include "../firmware/nodemcu_master/sms_scene.h"
 #include "../firmware/nodemcu_master/shared_targets.h"
 volatile uint16_t testResult = 0;
 #define CHECK(condition) do { if (!(condition)) { testResult = __LINE__; for (;;) {} } } while (0)
@@ -153,6 +154,12 @@ int main() {
   fused.update(left,true,right,true,100);
   present=0; for(auto &t:fused.tracker.tracks) if(t.present) ++present;
   CHECK(present==2);
+  TargetTrack smsTarget;
+  smsTarget.id=2; smsTarget.direction=-1;
+  smsTarget.filteredDistance=3250; smsTarget.baselineDistance=4250; smsTarget.filteredSpeed=-75;
+  char scene[144]{};
+  appendSmsTarget(scene,sizeof(scene),smsTarget);
+  CHECK(strstr(scene,"T2\nDirection: Towards\nDistance: 3.25 m\nSpeed: 0.75 m/s\nMovement: 1.00 m\n"));
   // Exercise actual GSM controller: AT sequence, useful message, submission and no repeat.
   modem.begin(100);
   drain(100); CHECK(strcmp(transmitted,"AT\r") == 0); reply("OK\r\n",100);
@@ -170,16 +177,33 @@ int main() {
   CHECK(strstr(transmitted,"Movement: 0.81 m") && !strstr(transmitted,"Human"));
   reply("+CMGS: 3\r\nOK\r\n",1100);
   CHECK(modem.smsSentCount == 1 && modem.sentSensor == 1 && modem.sentTarget == 12);
-  CHECK(modem.queueMovement(2,7,"MOVING AWAY",5300,820,1100,"T1 towards; T2 away; 1 stationary."));
+  CHECK(modem.queueMovement(2,7,"MOVING AWAY",5300,820,1100,"T1\nDirection: Towards\nDistance: 3.25 m\nSpeed: 0.75 m/s\nMovement: 1.00 m\nStationary: 1"));
   modem.tick(1200); CHECK(!modem.hasTx());
   modem.tick(29999); CHECK(!modem.hasTx());
   modem.tick(31100); drain(31100); CHECK(strcmp(transmitted,"AT+CMGF=1\r") == 0);
   reply("OK\r\n",31100); drain(31100); reply("OK\r\n",31100);
   drain(31100); reply("OK\r\n",31100); drain(31100); reply(">",31100); drain(31100);
-  CHECK(strstr(transmitted,"T1 towards; T2 away; 1 stationary."));
+  CHECK(strstr(transmitted,"T1\nDirection: Towards\nDistance: 3.25 m\nSpeed: 0.75 m/s\nMovement: 1.00 m\nStationary: 1"));
   reply("+CMGS: 4\r\nOK\r\n",31200);
   CHECK(modem.smsSentCount == 2 && modem.sentSensor == 2 && modem.sentTarget == 7);
   modem.tick(31201); CHECK(!modem.hasTx());
+  // Long scenes continue without an extra call or dropping the final lines.
+  char longScene[202];
+  for (unsigned i=0;i<200;++i) longScene[i]=i%2 ? '\n' : 'X';
+  longScene[200]=0;
+  CHECK(modem.queueMovement(1,9,"SUMMARY",0,0,32000,longScene));
+  modem.tick(61200); drain(61200); CHECK(strcmp(transmitted,"AT+CMGF=1\r")==0);
+  reply("OK\r\n",61200); drain(61200); reply("OK\r\n",61200);
+  drain(61200); reply("OK\r\n",61200); drain(61200); reply(">",61200); drain(61200);
+  CHECK(strlen(transmitted)<=161 && strstr(transmitted,"X\n"));
+  reply("+CMGS: 5\r\nOK\r\n",61300);
+  CHECK(modem.smsSentCount==2);
+  modem.tick(63300); drain(63300); CHECK(strcmp(transmitted,"AT+CMGF=1\r")==0);
+  reply("OK\r\n",63300); drain(63300); reply("OK\r\n",63300);
+  drain(63300); reply("OK\r\n",63300); drain(63300); reply(">",63300); drain(63300);
+  CHECK(strlen(transmitted)<=161 && strstr(transmitted,"X\n"));
+  reply("+CMGS: 6\r\nOK\r\n",63400);
+  CHECK(modem.smsSentCount==3 && modem.sentTarget==9);
   testResult = 65535;
   for (;;) {}
 }

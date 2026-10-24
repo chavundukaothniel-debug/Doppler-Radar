@@ -132,6 +132,7 @@ class GsmController {
         lastAttemptAt = now;
         activeSources = pendingSources;
         activeMovement = pendingMovement;
+        summaryOffset = 0;
         pendingSources = 0;
         smsError[0] = callError[0] = callDiagnostic[0] = cleanupError[0] = 0;
         if (callsEnabled) {
@@ -167,7 +168,23 @@ class GsmController {
         activeMovement.direction, activeMovement.distance / 1000, (activeMovement.distance % 1000) / 10,
         activeMovement.displacement / 1000, (activeMovement.displacement % 1000) / 10,
         static_cast<unsigned long>(activeMovement.at / 1000), 26);
-      if (activeMovement.summary[0]) snprintf(message, sizeof(message), "MOVEMENT ALERT\n%s%c", activeMovement.summary, 26);
+      if (activeMovement.summary[0]) {
+        const char *remaining = activeMovement.summary + summaryOffset;
+        // Each physical SMS fits the GSM 160-character limit. Keep whole lines.
+        size_t count = strlen(remaining);
+        if (count > 143) {
+          count = 143;
+          while (count && remaining[count-1] != '\n') --count;
+          if (!count) count = 143;
+        }
+        const char prefix[] = "MOVEMENT ALERT\n";
+        const size_t prefixLength = sizeof(prefix)-1;
+        memcpy(message,prefix,prefixLength);
+        memcpy(message+prefixLength,remaining,count);
+        message[prefixLength+count]=26;
+        message[prefixLength+count+1]=0;
+        summaryOffset += count;
+      }
       sawSubmission = false;
       raw(Step::Submit, message, now, 65000);
       return;
@@ -193,10 +210,11 @@ class GsmController {
     uint16_t target = 0, distance = 0, displacement = 0;
     uint32_t at = 0;
     char direction[16]{};
-    char summary[144]{};
+    char summary[576]{};
   };
   Movement movements[6], pendingMovement, activeMovement;
   uint8_t movementHead = 0, movementCount = 0;
+  uint16_t summaryOffset = 0;
   const char *phone;
   Step step = Step::Idle;
   bool waiting = false, initialized = false, attempted = false;
@@ -236,6 +254,12 @@ class GsmController {
   }
   void idle(uint32_t now) { step = Step::Idle; waiting = false; lastStatusAt = now; }
   void finishSms(uint32_t now, bool success) {
+    if (success && summaryOffset < strlen(activeMovement.summary)) {
+      pendingSms = true; sms = "SENDING";
+      quietAt = now; quietMs = 2000;
+      idle(now);
+      return;
+    }
     sms = success ? "SENT" : "FAILED";
     if (success) {
       smsSentAt = now; ++smsSentCount;

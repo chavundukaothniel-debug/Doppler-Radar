@@ -14,6 +14,7 @@
 #include "uno_link_receiver.h"
 #include "target_tracking.h"
 #include "shared_targets.h"
+#include "sms_scene.h"
 #include <WiFiClientSecureBearSSL.h>
 #include "dashboard_ca.h"
 #include <time.h>
@@ -138,7 +139,7 @@ void serviceTracking(uint32_t now) {
   tracker.expire(now);
   bool notify = false;
   uint8_t stationary = 0;
-  char summary[144]{};
+  char summary[576]{};
   size_t used = 0;
   uint16_t firstId = 0;
   for (auto &t : tracker.tracks) {
@@ -148,11 +149,9 @@ void serviceTracking(uint32_t now) {
       registerAlarm(3,now);
       if (!t.notificationQueued) { notify=true; firstId=t.id; }
     }
-    const int n=snprintf(summary+used,sizeof(summary)-used,"T%u %s; ",t.id,
-      t.direction < 0 ? "towards" : t.direction > 0 ? "away" : "moving");
-    if (n>0) used += min(size_t(n),sizeof(summary)-used-1);
+    used += appendSmsTarget(summary+used,sizeof(summary)-used,t);
   }
-  snprintf(summary+used,sizeof(summary)-used,"%u stationary.",stationary);
+  snprintf(summary+used,sizeof(summary)-used,"Stationary: %u",stationary);
   if (notify && gsm.queueMovement(1,firstId,"SUMMARY",0,0,now,summary)) {
     for (auto &t : tracker.tracks) if (t.present && t.moving && t.alarmQualified) t.notificationQueued=true;
     telemetryDirty=true;

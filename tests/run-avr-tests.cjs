@@ -1,10 +1,12 @@
-// Run the actual tracking/GSM C++ on an emulated AVR. Fixtures never enter production.
+// Run ESP8266 tracking/GSM C++ using AVR instructions with 16 KiB emulated SRAM.
+// Larger scene buffers belong to the ESP8266 master, not the physical Uno.
+// Fixtures never enter production.
 const fs=require('fs'), path=require('path'), cp=require('child_process');
 const {CPU,avrInstruction}=require('../.build/node_modules/avr8js');
 const bin=process.env.AVR_BIN || 'C:/Users/PC/AppData/Local/Arduino15/packages/arduino/tools/avr-gcc/7.3.0-atmel3.6.1-arduino7/bin';
 const run=(name,args)=>cp.execFileSync(path.join(bin,name+'.exe'),args,{encoding:'utf8'});
 const elf='.build/tracking-test.elf', hex='.build/tracking-test.hex';
-run('avr-g++',['-std=c++11','-Wall','-Wextra','-Werror','-Os','-mmcu=atmega2560','tests/tracking_firmware_test.cpp','-lm','-o',elf]);
+run('avr-g++',['-std=c++11','-Wall','-Wextra','-Werror','-Os','-mmcu=atmega2560','-Wl,--defsym=__stack=0x41ff','tests/tracking_firmware_test.cpp','-lm','-o',elf]);
 run('avr-objcopy',['-O','ihex',elf,hex]);
 const symbols=run('avr-nm',['-n',elf]);
 const match=symbols.match(/^([0-9a-f]+)\s+\w\s+testResult$/m);
@@ -17,7 +19,7 @@ for(const line of fs.readFileSync(hex,'utf8').trim().split(/\r?\n/)){
   if(type===4)upper=parseInt(line.slice(9,13),16)*65536;
   if(type===0)for(let i=0;i<length;i++)bytes[upper+offset+i]=parseInt(line.slice(9+i*2,11+i*2),16);
 }
-const cpu=new CPU(new Uint16Array(bytes.buffer),0x2200);
+const cpu=new CPU(new Uint16Array(bytes.buffer),0x4200);
 let result=0;
 for(let i=0;i<30000000;i++){
   avrInstruction(cpu);cpu.tick();
