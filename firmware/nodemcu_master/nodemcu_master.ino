@@ -21,6 +21,9 @@
 #ifndef DASHBOARD_TLS
 #define DASHBOARD_TLS true
 #endif
+#if DASHBOARD_TLS && !defined(MMU_IRAM_HEAP)
+#error "HTTPS requires Tools > MMU > 16KB cache + 48KB IRAM and 2nd Heap (shared)"
+#endif
 
 #ifndef ENABLE_BUZZER_SELF_TEST
 #define ENABLE_BUZZER_SELF_TEST true
@@ -53,7 +56,7 @@ uint32_t unoLinkOverflows = 0;
 AlarmLogic alarm;
 BuzzerOutput buzzer(BUZZER_PIN);
 StatusSounds statusSounds;
-constexpr char FIRMWARE_VERSION[] = "2026-10-24.3";
+constexpr char FIRMWARE_VERSION[] = "2026-10-24.4";
 uint8_t radarRxTail[16]{}, radarRxTailIndex = 0;
 uint32_t bootAt = 0;
 volatile uint32_t unoRiseUs = 0;
@@ -323,8 +326,11 @@ String telemetryJson(uint32_t now) {
   outputs["buzzerDrive"] = buzzer.state();
   outputs["buzzerRestarts"] = buzzer.restarts;
   outputs["buzzerPattern"] = "Startup: 3 rising notes; Wi-Fi: 2 high beeps; movement: 3600/4600 Hz siren";
+  if (doc.overflowed()) return String();
   String result;
-  serializeJson(doc, result);
+  const size_t needed = measureJson(doc);
+  if (!result.reserve(needed+1)) return String();
+  if (serializeJson(doc, result) != needed) return String();
   return result;
 }
 
@@ -335,7 +341,7 @@ WiFiClient &telemetryClient = DASHBOARD_TLS ? static_cast<WiFiClient&>(secureTel
 BearSSL::X509List dashboardTrust(DASHBOARD_CA);
 BearSSL::Session dashboardSession;
 bool tlsReady = false;
-String httpRequest, httpStatus;
+String httpRequest, httpBody, httpStatus;
 size_t httpOffset = 0;
 uint32_t httpStartedAt = 0, lastPostAt = 0;
 bool httpBusy = false, postAttempted = false, dashboardConnected = false;
@@ -419,8 +425,9 @@ void finishPost(bool accepted, const char *reason = "CONNECTION CLOSED") {
   else ++failedPosts;
   telemetryClient.stop();
   httpBusy = false;
-  httpRequest = "";
-  httpStatus = "";
+  httpRequest = String();
+  httpBody = String();
+  httpStatus = String();
   if (dashboardConnected != accepted) {
     dashboardConnected = accepted;
     if (accepted) Serial.println(F("[Dashboard] Telemetry accepted"));
@@ -438,11 +445,14 @@ void serviceTelemetry(uint32_t now) {
   if (DASHBOARD_TLS && (!tlsReady || time(nullptr) < 1700000000)) return;
   if (httpBusy) {
     if (uint32_t(now - httpStartedAt) > 3200) { finishPost(false, "HTTP RESPONSE TIMEOUT"); return; }
-    if (httpOffset < httpRequest.length()) {
+    if (httpOffset < httpRequest.length() + httpBody.length()) {
+      const bool headers = httpOffset < httpRequest.length();
+      const String &part = headers ? httpRequest : httpBody;
+      const size_t offset = headers ? httpOffset : httpOffset - httpRequest.length();
       const int available = telemetryClient.availableForWrite();
       if (available > 0) {
-        const size_t n = min(size_t(available), min(size_t(128), httpRequest.length() - httpOffset));
-        httpOffset += telemetryClient.write(reinterpret_cast<const uint8_t *>(httpRequest.c_str() + httpOffset), n);
+        const size_t n = min(size_t(available), min(size_t(128), part.length() - offset));
+        httpOffset += telemetryClient.write(reinterpret_cast<const uint8_t *>(part.c_str() + offset), n);
       }
     }
     for (unsigned i = 0; i < 128 && telemetryClient.available(); ++i) {
@@ -463,6 +473,18 @@ void serviceTelemetry(uint32_t now) {
   if (postAttempted && uint32_t(now - lastPostAt) < (!DASHBOARD_TLS && telemetryDirty && dashboardConnected ? 100UL : interval)) return;
   postAttempted = true;
   lastPostAt = now;
+  // Build and destroy the JSON document before the TLS handshake allocates memory.
+  httpBody = telemetryJson(millis());
+  if (httpBody.isEmpty()) { finishPost(false,"TELEMETRY MEMORY LOW"); return; }
+  if (!httpRequest.reserve(320 + strlen(DEVICE_API_KEY))) { finishPost(false,"HEADER MEMORY LOW"); return; }
+  httpRequest = String("POST /api/telemetry HTTP/1.1\r\nHost: ") +
+    (DASHBOARD_TLS ? String("doppler-radar.onrender.com") : dashboardIp.toString() + ":" + dashboardPort) +
+    "\r\nConnection: close\r\nContent-Type: application/json\r\nX-Device-Key: " + DEVICE_API_KEY +
+    "\r\nContent-Length: " + httpBody.length() + "\r\n\r\n";
+  if (DASHBOARD_TLS && (ESP.getFreeHeap() < 10000 || ESP.getMaxFreeBlockSize() < 5000)) {
+    Serial.println(F("[Dashboard] Low free memory; deferring HTTPS instead of restarting"));
+    finishPost(false,"TLS MEMORY LOW"); return;
+  }
   telemetryClient.setTimeout(DASHBOARD_TLS ? 15000 : 200);
   if (DASHBOARD_TLS) {
     IPAddress resolved;
@@ -482,10 +504,6 @@ void serviceTelemetry(uint32_t now) {
     finishPost(false,"TCP CONNECT FAILED"); return;
   }
   telemetryClient.setNoDelay(true);
-  const String body = telemetryJson(millis());
-  httpRequest = String("POST /api/telemetry HTTP/1.1\r\nHost: ") + (DASHBOARD_TLS ? String("doppler-radar.onrender.com") : dashboardIp.toString() + ":" + dashboardPort) +
-    "\r\nConnection: close\r\nContent-Type: application/json\r\nX-Device-Key: " + DEVICE_API_KEY +
-    "\r\nContent-Length: " + body.length() + "\r\n\r\n" + body;
   httpOffset = 0;
   httpStartedAt = millis();
   httpBusy = true;
@@ -579,7 +597,7 @@ void setup() {
   // Keep the radio awake for frequent telemetry rather than modem-sleep delays.
   WiFi.setSleepMode(WIFI_NONE_SLEEP);
   dashboardAddressValid = dashboardIp.fromString(DASHBOARD_HOST);
-  if (!dashboardAddressValid) Serial.println(F("[Dashboard] Waiting for automatic Wi-Fi discovery"));
+  if (!DASHBOARD_TLS && !dashboardAddressValid) Serial.println(F("[Dashboard] Waiting for automatic Wi-Fi discovery"));
   if (DASHBOARD_TLS) {
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
     // Full-size TLS receive records preserve compatibility without disabling validation.

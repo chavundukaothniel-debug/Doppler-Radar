@@ -1,6 +1,6 @@
 # Doppler Radar System
 
-University engineering prototype using two RD-03D sensors, an Arduino Uno and an ESP8266 NodeMCU. Current active firmware: **2026-10-24.3**.
+University engineering prototype using two RD-03D sensors, an Arduino Uno and an ESP8266 NodeMCU. Current active firmware: **2026-10-24.4**.
 
 ## Published dashboard (Render)
 
@@ -90,3 +90,7 @@ This repository contains the active firmware, GSM diagnostic, dashboard, source 
 ## HTTPS memory update (24 October)
 
 Firmware 2026-10-24.3 reduces the UART receive allocation to 4096 bytes, SoftwareSerial edge queues to 256 entries each, and pending scene queue to two complete scenes. A full queue returns false so unqueued targets retry. This frees approximately 12 KiB versus the prior firmware for TLS buffers. Each scene still includes up to six unique objects. Certificate and hostname verification remain enabled, with full 16 KiB TLS receive records. Actual free heap and secure connection success must be checked on the powered device. Synchronous handshakes can overflow serial queues; frames with gaps must be reacquired rather than interpreted as movement.
+
+## Required Arduino memory setting for HTTPS
+
+Before uploading NodeMCU firmware 2026-10-24.4 or newer, select Tools > MMU > 16KB cache + 48KB IRAM and 2nd Heap (shared). The ESP8266 BearSSL allocator prefers this additional heap for TLS input/output buffers, leaving ordinary RAM for certificate validation and tracking. HTTPS builds intentionally fail with a descriptive error if this setting is absent. Local HTTP builds do not require it. Telemetry JSON is constructed before the TLS handshake, checked for allocation failures, and transmitted in separate header/body buffers without duplicating the full body. The firmware defers connections if ordinary RAM is critically low. This prevents a known certificate-validator allocation failure; real connection success still requires checking the device log.

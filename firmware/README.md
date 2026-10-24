@@ -1,3 +1,5 @@
+> Current cloud firmware: 2026-10-24.4. For HTTPS, select **Tools > MMU > 16KB cache + 48KB IRAM and 2nd Heap (shared)** before uploading the NodeMCU sketch. Current cloud settings and behavior are documented in the root README; historical local-only notes below are superseded.
+
 # Active firmware: Uno + ESP8266 NodeMCU
 
 Current NodeMCU version: **2026-10-11.8**. Upload both active sketches for the measurement-sequence and tracking update. See [TRACKING_UPDATE.md](../TRACKING_UPDATE.md) for behavior and physical tests.
