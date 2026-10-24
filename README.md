@@ -1,6 +1,20 @@
 # Doppler Radar System
 
-University engineering prototype using two RD-03D sensors, an Arduino Uno and an ESP8266 NodeMCU. Current active firmware: **2026-10-11.8**.
+University engineering prototype using two RD-03D sensors, an Arduino Uno and an ESP8266 NodeMCU. Current active firmware: **2026-10-24.1**.
+
+## Published dashboard (Render)
+
+Repository root now contains package.json and render.yaml. Build: npm install --omit=dev. Start: npm start. The server binds Render's PORT on 0.0.0.0. Open https://doppler-radar.onrender.com on a phone or computer after deploying main. Render changes are left to the owner.
+
+Set DOPPLER_DEVICE_KEY in Render to exactly the DEVICE_API_KEY in private firmware/nodemcu_master/secrets.h. Set DOPPLER_INITIAL_PASSWORD before first launch; sign in as admin and change the password. Without a persistent Render disk, account changes and recordings reset on redeployment.
+
+Upload the updated NodeMCU sketch: it defaults to verified HTTPS to doppler-radar.onrender.com:443, including hostname resolution and time synchronization. Public CA roots are bundled; no certificate filesystem upload is needed. Existing Wi-Fi, phone and device key stay private. DASHBOARD_TLS false restores local HTTP/discovery mode. Never put an https:// prefix into DASHBOARD_HOST. TLS can pause acquisition during connection handshakes; verify with the hardware, especially at cold start.
+
+## Shared objects and SMS
+
+The master fuses co-facing sensors into one tracking list (up to six unique objects). Cross-sensor matches require distance within 200 mm, position within 350 mm, compatible motion, and one-to-one pairing. Separate returns from one sensor are never merged. Opposite-moving returns remain separate. Identical overlapping targets cannot be reliably distinguished by these sensors. Adjust matching tolerances after bench testing the actual mounting.
+
+Each qualified movement SMS includes all currently moving object IDs and directions plus the number of fresh stationary objects, for example: T1 towards; T2 away; 1 stationary. Stationary returns never initiate an SMS. The existing 800 mm movement threshold, persistence checks, modem call sequence and cooldown remain. Summaries describe the scene when queued; delivery can occur later during the existing modem cooldown. The dashboard lists shared IDs once; per-sensor raw slots remain available in recordings.
 
 ## Start the dashboard
 

@@ -2,7 +2,6 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { fuseTargets } = require('./target-fusion');
 
 const ROOT = __dirname;
 const MAX_BODY_BYTES = 32 * 1024;
@@ -24,7 +23,7 @@ function hashPassword(password, salt = crypto.randomBytes(16)) {
 }
 
 function createDefaultUsers() {
-  const initialPassword = process.env.DOPPLER_INITIAL_PASSWORD || 'Kayler@2025';
+  const initialPassword = process.env.DOPPLER_INITIAL_PASSWORD || 'ChangeMe!2026';
   return [
     ['usr_admin_001', 'admin', 'Administrator'],
     ['usr_operator_001', 'operator', 'Operator'],
@@ -163,7 +162,7 @@ function normalizeTelemetry(payload, previous, receivedAt) {
   const inputSensors = Array.isArray(payload.sensors) ? payload.sensors : [];
   const sensorsWithTargets = [1, 2].map((id) => {
     const input = inputSensors.find((sensor) => Number(sensor?.id) === id) || {};
-    const targets = (Array.isArray(input.targets) ? input.targets : []).slice(0, 3)
+    const targets = (Array.isArray(input.targets) ? input.targets : []).slice(0, 6)
       .filter(t => t && Number.isFinite(Number(t.x)) && Number.isFinite(Number(t.y)))
       .map((target, index) => normalizeTarget(target, id, index, receivedAt))
       .filter(t => t.distance > 0 && t.distance <= 7 &&
@@ -197,7 +196,10 @@ function normalizeTelemetry(payload, previous, receivedAt) {
     lastData: receivedAt,
     deviceId: safeText(payload.deviceId, previous.deviceId),
     controller: safeText(payload.controller, 'ESP controller'),
-    targets: fuseTargets(sensorsWithTargets.flatMap((sensor) => sensor.targets)),
+    targets: Array.isArray(payload.sharedTargets)
+      ? payload.sharedTargets.slice(0, 6).map((t,i) => normalizeTarget(t, 1, i, receivedAt))
+        .filter(t => t.active && t.distance > 0 && t.distance <= 7 && t.lastSeenAgeMs !== null && t.lastSeenAgeMs < t.displayHoldMs)
+      : sensorsWithTargets.flatMap((sensor) => sensor.targets),
     sensors: sensorsWithTargets.map(({ targets, ...sensor }) => sensor),
     gsm: {
       connected: Boolean(gsm.connected), network: Boolean(gsm.network), signal: Number(gsm.signal) === 99 ? null : Math.floor(finiteNumber(gsm.signal, 0, 0, 31)),
@@ -287,7 +289,7 @@ function publicTelemetry(state, events) {
     gsm: { ...state.gsm, connected: online && state.gsm.connected, network: online && state.gsm.network },
     sensors: state.sensors.map((sensor) => ({ ...sensor,
       lastFrameAgeMs: sensor.lastFrameAgeMs === null ? null : Math.min(60000, (sensor.lastFrameAgeMs || 0) + age),
-      targetCount: targets.filter(t => (t.sensorIds || [t.sensorId]).includes(sensor.id)).length,
+      targetCount: targets.filter(t => t.sensorId === sensor.id).length,
       online: sensor.mode === 'trigger' ? null : online && sensor.online && (sensor.lastFrameAgeMs || 0) + age < SENSOR_HEALTH_MS,
       linkOnline: sensor.mode === 'linked' ? online && sensor.linkOnline && (sensor.lastFrameAgeMs || 0) + age < SENSOR_HEALTH_MS : sensor.linkOnline,
       triggerActive: online && sensor.triggerActive, detectionActive: online && sensor.detectionActive })),
@@ -328,12 +330,12 @@ function createApp(options = {}) {
         user.lastLogin = new Date().toISOString(); store.saveUsers(users);
         const sessionId = crypto.randomBytes(32).toString('base64url');
         sessions.set(sessionId, { userId: user.id, expiresAt: Date.now() + SESSION_TTL_MS });
-        return sendJson(res, 200, { user: publicUser(user) }, { 'Set-Cookie': `doppler_session=${sessionId}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_MS / 1000}` });
+        return sendJson(res, 200, { user: publicUser(user) }, { 'Set-Cookie': `doppler_session=${sessionId}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_MS / 1000}` });
       }
       if (req.method === 'POST' && url.pathname === '/api/auth/logout') {
         const id = (req.headers.cookie || '').match(/doppler_session=([^;]+)/)?.[1];
         if (id) sessions.delete(id);
-        return sendJson(res, 200, { ok: true }, { 'Set-Cookie': 'doppler_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0' });
+        return sendJson(res, 200, { ok: true }, { 'Set-Cookie': 'doppler_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
       }
       if (req.method === 'GET' && url.pathname === '/api/auth/session') {
         const user = sessionUser(req);

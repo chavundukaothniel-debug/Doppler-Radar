@@ -64,7 +64,7 @@ All ten backend tests passed. The build results below describe the earlier .1 bu
 the .2 sketches were separately compiled during this follow-up.
 
 The supplied Wi-Fi credentials are saved only in the private active NodeMCU
-`firmware/nodemcu_master/secrets.h`. SSID is [configured privately in secrets.h]; the password is not copied into
+`firmware/nodemcu_master/secrets.h`. SSID is ZANUPF; the password is not copied into
 documentation. No private configuration previously existed in this checkout, so the
 new file retains example dashboard address/key and an empty recipient until those
 are configured. Do not assume telemetry or GSM is configured merely because Wi-Fi is.

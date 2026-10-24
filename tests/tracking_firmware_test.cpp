@@ -2,6 +2,7 @@
 #include "../firmware/nodemcu_master/uno_link_receiver.h"
 #include "../firmware/nodemcu_master/gsm_controller.h"
 #include <string.h>
+#include "../firmware/nodemcu_master/shared_targets.h"
 volatile uint16_t testResult = 0;
 #define CHECK(condition) do { if (!(condition)) { testResult = __LINE__; for (;;) {} } } while (0)
 RadarTarget returns[3];
@@ -134,6 +135,24 @@ int main() {
   sample(3200, -400, 800);
   CHECK(tracker.tracks[0].id == fastId && tracker.tracks[0].y == 3200);
   tracker.expire(2000); CHECK(!tracker.tracks[0].present);
+  // Co-facing radar fusion: same object once; distinct and opposite movers retained.
+  SharedTargets fused;
+  RadarTarget left[3]{}, right[3]{};
+  left[0].valid=right[0].valid=true;
+  left[0].y=2000; right[0].y=2070;
+  fused.update(left,true,right,true,100);
+  uint8_t present=0; for (auto &t:fused.tracker.tracks) if(t.present) ++present;
+  CHECK(present==1);
+  left[1].valid=right[1].valid=true; left[1].y=4000; right[1].y=4050;
+  fused.update(left,true,right,true,200);
+  present=0; for(auto &t:fused.tracker.tracks) if(t.present) ++present;
+  CHECK(present==2);
+  for(auto &t:fused.tracker.tracks) CHECK(!t.alarmQualified);
+  fused=SharedTargets{}; left[0].speed=-30; right[0].speed=30;
+  left[1].valid=right[1].valid=false;
+  fused.update(left,true,right,true,100);
+  present=0; for(auto &t:fused.tracker.tracks) if(t.present) ++present;
+  CHECK(present==2);
   // Exercise actual GSM controller: AT sequence, useful message, submission and no repeat.
   modem.begin(100);
   drain(100); CHECK(strcmp(transmitted,"AT\r") == 0); reply("OK\r\n",100);
@@ -151,14 +170,13 @@ int main() {
   CHECK(strstr(transmitted,"Movement: 0.81 m") && !strstr(transmitted,"Human"));
   reply("+CMGS: 3\r\nOK\r\n",1100);
   CHECK(modem.smsSentCount == 1 && modem.sentSensor == 1 && modem.sentTarget == 12);
-  CHECK(modem.queueMovement(2,7,"MOVING AWAY",5300,820,1100));
+  CHECK(modem.queueMovement(2,7,"MOVING AWAY",5300,820,1100,"T1 towards; T2 away; 1 stationary."));
   modem.tick(1200); CHECK(!modem.hasTx());
   modem.tick(29999); CHECK(!modem.hasTx());
   modem.tick(31100); drain(31100); CHECK(strcmp(transmitted,"AT+CMGF=1\r") == 0);
   reply("OK\r\n",31100); drain(31100); reply("OK\r\n",31100);
   drain(31100); reply("OK\r\n",31100); drain(31100); reply(">",31100); drain(31100);
-  CHECK(strstr(transmitted,"S2-T7") && strstr(transmitted,"MOVING AWAY"));
-  CHECK(strstr(transmitted,"Movement: 0.82 m"));
+  CHECK(strstr(transmitted,"T1 towards; T2 away; 1 stationary."));
   reply("+CMGS: 4\r\nOK\r\n",31200);
   CHECK(modem.smsSentCount == 2 && modem.sentSensor == 2 && modem.sentTarget == 7);
   modem.tick(31201); CHECK(!modem.hasTx());

@@ -32,7 +32,7 @@ class TargetTracker {
  public:
   static constexpr uint32_t staleMs = 1200, stationaryMs = 1200;
   static constexpr int thresholdMm = 800, speedThresholdCmS = 5;
-  TargetTrack tracks[3];
+  TargetTrack tracks[6];
   void expire(uint32_t now) {
     for (auto &t : tracks) {
       if (!t.present) continue;
@@ -47,17 +47,17 @@ class TargetTracker {
       }
     }
   }
-  void update(const RadarTarget *returns, uint32_t now) {
+  void update(const RadarTarget *returns, uint32_t now, uint8_t count = 3) {
     expire(now);
-    bool usedTrack[3]{}, usedReturn[3]{};
+    bool usedTrack[6]{}, usedReturn[6]{};
     // Closest pair first, independently for each sensor; slots may reorder.
-    for (uint8_t pass = 0; pass < 3; ++pass) {
+    for (uint8_t pass = 0; pass < count; ++pass) {
       int bestTrack = -1, bestReturn = -1;
       float best = 1e10f;
-      for (uint8_t i = 0; i < 3; ++i) {
+      for (uint8_t i = 0; i < 6; ++i) {
         if (usedTrack[i] || !tracks[i].present) continue;
         const float gate = fminf(1200, 250 + uint32_t(now - tracks[i].lastSeen) * 2.0f);
-        for (uint8_t j = 0; j < 3; ++j) {
+        for (uint8_t j = 0; j < count; ++j) {
           if (usedReturn[j] || !valid(returns[j])) continue;
           float dx = float(returns[j].x) - predictedX(tracks[i], now), dy = float(returns[j].y) - predictedY(tracks[i], now);
           float d = dx * dx + dy * dy;
@@ -68,13 +68,13 @@ class TargetTracker {
       usedTrack[bestTrack] = usedReturn[bestReturn] = true;
       bool ambiguous = false;
       const float bestDistance = sqrtf(best);
-      for (uint8_t j = 0; j < 3; ++j) {
+      for (uint8_t j = 0; j < count; ++j) {
         if (j == bestReturn || !valid(returns[j])) continue;
         const float dx = float(returns[j].x) - predictedX(tracks[bestTrack], now);
         const float dy = float(returns[j].y) - predictedY(tracks[bestTrack], now);
         if (sqrtf(dx * dx + dy * dy) <= bestDistance + 125) ambiguous = true;
       }
-      for (uint8_t i = 0; i < 3; ++i) {
+      for (uint8_t i = 0; i < 6; ++i) {
         if (i == bestTrack || !tracks[i].present) continue;
         const float dx = float(returns[bestReturn].x) - predictedX(tracks[i], now);
         const float dy = float(returns[bestReturn].y) - predictedY(tracks[i], now);
@@ -93,9 +93,9 @@ class TargetTracker {
         track.baselineX = track.x; track.baselineY = track.y; track.windowAt = now;
       }
     }
-    for (uint8_t j = 0; j < 3; ++j) {
+    for (uint8_t j = 0; j < count; ++j) {
       if (usedReturn[j] || !valid(returns[j])) continue;
-      for (uint8_t i = 0; i < 3; ++i) {
+      for (uint8_t i = 0; i < 6; ++i) {
         if (tracks[i].present) continue;
         TargetTrack &t = tracks[i];
         t.present = true; t.id = ++nextId;

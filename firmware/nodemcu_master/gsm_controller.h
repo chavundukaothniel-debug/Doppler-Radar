@@ -53,12 +53,13 @@ class GsmController {
   void begin(uint32_t now) { command(Step::Probe, "AT", now); }
   void queueAlert(uint8_t sources, uint32_t now) { pendingSources |= sources; pendingAt = now; }
   bool queueMovement(uint8_t sensor, uint16_t target, const char *direction,
-                     uint16_t distance, uint16_t movement, uint32_t now) {
+                     uint16_t distance, uint16_t movement, uint32_t now, const char *summary = nullptr) {
     if (movementCount >= 6) return false;
     Movement &m = movements[(movementHead + movementCount++) % 6];
     m.sensor = sensor; m.target = target; m.distance = distance;
     m.displacement = movement; m.at = now;
     snprintf(m.direction, sizeof(m.direction), "%s", direction);
+    snprintf(m.summary, sizeof(m.summary), "%s", summary ? summary : "");
     return true;
   }
   bool hasTx() const { return txOffset < txLength; }
@@ -166,6 +167,7 @@ class GsmController {
         activeMovement.direction, activeMovement.distance / 1000, (activeMovement.distance % 1000) / 10,
         activeMovement.displacement / 1000, (activeMovement.displacement % 1000) / 10,
         static_cast<unsigned long>(activeMovement.at / 1000), 26);
+      if (activeMovement.summary[0]) snprintf(message, sizeof(message), "MOVEMENT ALERT\n%s%c", activeMovement.summary, 26);
       sawSubmission = false;
       raw(Step::Submit, message, now, 65000);
       return;
@@ -191,6 +193,7 @@ class GsmController {
     uint16_t target = 0, distance = 0, displacement = 0;
     uint32_t at = 0;
     char direction[16]{};
+    char summary[144]{};
   };
   Movement movements[6], pendingMovement, activeMovement;
   uint8_t movementHead = 0, movementCount = 0;

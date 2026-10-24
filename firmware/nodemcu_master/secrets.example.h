@@ -7,8 +7,9 @@
 
 // Automatic discovery is enabled. Optional static LAN IPv4 fallback; never localhost.
 #define DASHBOARD_HOST ""
-#define ENABLE_DASHBOARD_DISCOVERY true
-#define DASHBOARD_PORT 8080
+#define ENABLE_DASHBOARD_DISCOVERY false
+#define DASHBOARD_TLS true
+#define DASHBOARD_PORT 443
 #define DEVICE_API_KEY "replace-with-the-dashboard-DOPPLER_DEVICE_KEY"
 #define ENABLE_DASHBOARD_TELEMETRY true
 

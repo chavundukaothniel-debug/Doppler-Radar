@@ -13,6 +13,13 @@
 #include "radar_protocol.h"
 #include "uno_link_receiver.h"
 #include "target_tracking.h"
+#include "shared_targets.h"
+#include <WiFiClientSecureBearSSL.h>
+#include "dashboard_ca.h"
+#include <time.h>
+#ifndef DASHBOARD_TLS
+#define DASHBOARD_TLS true
+#endif
 
 #ifndef ENABLE_BUZZER_SELF_TEST
 #define ENABLE_BUZZER_SELF_TEST true
@@ -39,12 +46,13 @@ SoftwareSerial unoSerial;
 GsmController gsm(ALERT_PHONE_NUMBER, ENABLE_GSM_CALL);
 RadarProtocol radar;
 UnoLinkReceiver unoLink;
-TargetTracker trackers[2];
+SharedTargets sharedTargets;
+bool sharedMeasurementsDirty = false;
 uint32_t unoLinkOverflows = 0;
 AlarmLogic alarm;
 BuzzerOutput buzzer(BUZZER_PIN);
 StatusSounds statusSounds;
-constexpr char FIRMWARE_VERSION[] = "2026-10-11.8";
+constexpr char FIRMWARE_VERSION[] = "2026-10-24.1";
 uint8_t radarRxTail[16]{}, radarRxTailIndex = 0;
 uint32_t bootAt = 0;
 volatile uint32_t unoRiseUs = 0;
@@ -103,7 +111,7 @@ void serviceUnoLink(uint32_t now) {
   for (uint8_t i = 0; i < 64 && unoSerial.available(); ++i) {
     if (unoLink.push(static_cast<uint8_t>(unoSerial.read()), now)) {
       if (!wasOnline) telemetryDirty = true;
-      if (unoLink.newMeasurement) trackers[0].update(unoLink.targets, now);
+      if (unoLink.newMeasurement) sharedMeasurementsDirty = true;
     }
   }
   if (unoSerial.overflow()) ++unoLinkOverflows;
@@ -115,41 +123,54 @@ void serviceRadar(uint32_t now) {
     radarRxTail[radarRxTailIndex] = value;
     radarRxTailIndex = (radarRxTailIndex + 1) % sizeof(radarRxTail);
     if (!radar.push(value, now)) continue;
-    trackers[1].update(radar.targets, now);
+    sharedMeasurementsDirty = true;
   }
 }
 
 void serviceTracking(uint32_t now) {
   static uint32_t sentCount = 0;
-  for (uint8_t s = 0; s < 2; ++s) {
-    trackers[s].expire(now);
-    for (auto &t : trackers[s].tracks) {
-      if (!t.present || !t.alarmQualified || !t.moving || uint32_t(now - t.lastSeen) >= TargetTracker::staleMs) continue;
-      registerAlarm(s + 1, now);
-      if (!t.notificationQueued) {
-        // One modem transaction per continuous track, including after cooldown.
-        t.notificationQueued = gsm.queueMovement(uint8_t(s + 1), t.id, t.directionName(),
-          uint16_t(t.filteredDistance), uint16_t(fabsf(t.displacement())), now);
-        if (!t.notificationQueued) continue;
-        Serial.printf("[S%u-T%u] ALARM QUALIFIED: %.2f m; movement %.2f m; %s\n",
-          s + 1, t.id, t.filteredDistance / 1000, fabsf(t.displacement()) / 1000, t.directionName());
-        telemetryDirty = true;
-      }
-    }
+  auto &tracker = sharedTargets.tracker;
+  if (sharedMeasurementsDirty) {
+    sharedTargets.update(unoLink.targets, unoLink.fresh(now) && unoLink.radarFresh,
+      radar.targets, radar.fresh(now), now);
+    sharedMeasurementsDirty = false;
   }
-  if (gsm.smsSentCount != sentCount) {
-    sentCount = gsm.smsSentCount;
-    for (auto &t : trackers[gsm.sentSensor == 2 ? 1 : 0].tracks)
-      if (t.present && t.id == gsm.sentTarget) t.gsmSent = true;
-    telemetryDirty = true;
+  tracker.expire(now);
+  bool notify = false;
+  uint8_t stationary = 0;
+  char summary[144]{};
+  size_t used = 0;
+  uint16_t firstId = 0;
+  for (auto &t : tracker.tracks) {
+    if (!t.present || uint32_t(now-t.lastSeen) >= TargetTracker::staleMs) continue;
+    if (!t.moving) { ++stationary; continue; }
+    if (t.alarmQualified) {
+      registerAlarm(3,now);
+      if (!t.notificationQueued) { notify=true; firstId=t.id; }
+    }
+    const int n=snprintf(summary+used,sizeof(summary)-used,"T%u %s; ",t.id,
+      t.direction < 0 ? "towards" : t.direction > 0 ? "away" : "moving");
+    if (n>0) used += min(size_t(n),sizeof(summary)-used-1);
+  }
+  snprintf(summary+used,sizeof(summary)-used,"%u stationary.",stationary);
+  if (notify && gsm.queueMovement(1,firstId,"SUMMARY",0,0,now,summary)) {
+    for (auto &t : tracker.tracks) if (t.present && t.moving && t.alarmQualified) t.notificationQueued=true;
+    telemetryDirty=true;
+  }
+  if (sentCount != gsm.smsSentCount) {
+    sentCount=gsm.smsSentCount;
+    // Only the queued transaction's identified target is delivery-confirmed.
+    for (auto &t : tracker.tracks) if (t.id==gsm.sentTarget) t.gsmSent=true;
+    telemetryDirty=true;
   }
 }
 
 void addTrackedTargets(JsonArray output, uint8_t sensorId, uint32_t now) {
-  for (const auto &t : trackers[sensorId - 1].tracks) {
+  if (sensorId != 1) return;
+  for (const auto &t : sharedTargets.tracker.tracks) {
     if (!t.present || uint32_t(now - t.lastSeen) >= t.retentionMs()) continue;
     JsonObject item = output.add<JsonObject>();
-    item["targetId"] = String("S") + sensorId + "-T" + t.id;
+    item["targetId"] = String("T") + t.id;
     item["x"] = t.x / 1000.0f; item["y"] = t.y / 1000.0f;
     item["distance"] = t.distance / 1000.0f; item["speed"] = t.filteredSpeed / 100.0f;
     item["rawSpeedCmS"] = t.speed;
@@ -164,6 +185,16 @@ void addTrackedTargets(JsonArray output, uint8_t sensorId, uint32_t now) {
     item["lastSeenAgeMs"] = uint32_t(now - t.lastSeen);
     item["lastSeenUptimeMs"] = t.lastSeen;
     item["displayHoldMs"] = t.retentionMs();
+  }
+}
+
+void addSensorObservations(JsonArray output, const RadarTarget *slots) {
+  for (uint8_t i=0; i<3; ++i) {
+    if (!slots[i].valid) continue;
+    JsonObject item=output.add<JsonObject>();
+    item["x"]=slots[i].x/1000.0f; item["y"]=slots[i].y/1000.0f;
+    item["distance"]=sqrtf(float(slots[i].distanceSquared()))/1000.0f;
+    item["speed"]=slots[i].speed/100.0f; item["active"]=true;
   }
 }
 
@@ -239,7 +270,7 @@ String telemetryJson(uint32_t now) {
   uno["triggerCount"] = unoTriggers;
   uno["lastTriggerAgeMs"] = unoSeen ? int32_t(now - unoLastAt) : -1;
   JsonArray unoTargets = uno["targets"].to<JsonArray>();
-  if (unoLink.fresh(now) && unoLink.radarFresh) addTrackedTargets(unoTargets, 1, now);
+  if (unoLink.fresh(now) && unoLink.radarFresh) addSensorObservations(unoTargets, unoLink.targets);
   JsonObject sensor = sensors.add<JsonObject>();
   sensor["id"] = 2;
   sensor["mode"] = "uart";
@@ -247,7 +278,8 @@ String telemetryJson(uint32_t now) {
   sensor["lastFrameAgeMs"] = radar.seen ? now - radar.lastFrameAt : 60000;
   sensor["frames"] = radar.frames;
   JsonArray targets = sensor["targets"].to<JsonArray>();
-  if (radar.fresh(now)) addTrackedTargets(targets, 2, now);
+  if (radar.fresh(now)) addSensorObservations(targets, radar.targets);
+  addTrackedTargets(doc["sharedTargets"].to<JsonArray>(), 1, now);
   // Latest decoded sensor slots, before smoothing/association; not raw RF samples.
   JsonArray measurements = doc["measurements"].to<JsonArray>();
   for (uint8_t id = 1; id <= 2; ++id) {
@@ -298,7 +330,12 @@ String telemetryJson(uint32_t now) {
 }
 
 // Advance HTTP incrementally; TCP connection waits are bounded to 200 ms.
-WiFiClient telemetryClient;
+BearSSL::WiFiClientSecure secureTelemetryClient;
+WiFiClient plainTelemetryClient;
+WiFiClient &telemetryClient = DASHBOARD_TLS ? static_cast<WiFiClient&>(secureTelemetryClient) : plainTelemetryClient;
+BearSSL::X509List dashboardTrust(DASHBOARD_CA);
+BearSSL::Session dashboardSession;
+bool tlsReady = false;
 String httpRequest, httpStatus;
 size_t httpOffset = 0;
 uint32_t httpStartedAt = 0, lastPostAt = 0;
@@ -326,7 +363,7 @@ String discoveryProof(const String &nonce, uint16_t port, const String &address)
 }
 
 void serviceDiscovery(uint32_t now) {
-  if (!ENABLE_DASHBOARD_DISCOVERY || !ENABLE_DASHBOARD_TELEMETRY) return;
+  if (DASHBOARD_TLS || !ENABLE_DASHBOARD_DISCOVERY || !ENABLE_DASHBOARD_TELEMETRY) return;
   if (WiFi.status() != WL_CONNECTED) {
     if (discoveryStarted) discoveryUdp.stop();
     discoveryStarted = false;
@@ -381,7 +418,7 @@ void finishPost(bool accepted, const char *reason = "CONNECTION CLOSED") {
   lastPostResult = accepted ? "ACCEPTED" : reason;
   if (accepted) { ++acceptedPosts; lastAcceptedAt = millis(); }
   else ++failedPosts;
-  telemetryClient.abort();
+  telemetryClient.stop();
   httpBusy = false;
   httpRequest = "";
   httpStatus = "";
@@ -398,7 +435,8 @@ void serviceTelemetry(uint32_t now) {
     if (httpBusy) finishPost(false, "WI-FI DISCONNECTED");
     return;
   }
-  if (!dashboardAddressValid) return;
+  if (!DASHBOARD_TLS && !dashboardAddressValid) return;
+  if (DASHBOARD_TLS && (!tlsReady || time(nullptr) < 1700000000)) return;
   if (httpBusy) {
     if (uint32_t(now - httpStartedAt) > 3200) { finishPost(false, "HTTP RESPONSE TIMEOUT"); return; }
     if (httpOffset < httpRequest.length()) {
@@ -422,15 +460,15 @@ void serviceTelemetry(uint32_t now) {
     if (!telemetryClient.connected() && !telemetryClient.available()) finishPost(false);
     return;
   }
-  const uint32_t interval = dashboardConnected ? TELEMETRY_INTERVAL_MS : 2000;
-  if (postAttempted && uint32_t(now - lastPostAt) < (telemetryDirty && dashboardConnected ? 100UL : interval)) return;
+  const uint32_t interval = DASHBOARD_TLS ? 2000 : dashboardConnected ? TELEMETRY_INTERVAL_MS : 2000;
+  if (postAttempted && uint32_t(now - lastPostAt) < (!DASHBOARD_TLS && telemetryDirty && dashboardConnected ? 100UL : interval)) return;
   postAttempted = true;
   lastPostAt = now;
-  telemetryClient.setTimeout(200);
-  if (!telemetryClient.connect(dashboardIp, dashboardPort)) { finishPost(false, "TCP CONNECT FAILED"); return; }
+  telemetryClient.setTimeout(DASHBOARD_TLS ? 5000 : 200);
+  if (!(DASHBOARD_TLS ? telemetryClient.connect("doppler-radar.onrender.com", 443) : telemetryClient.connect(dashboardIp, dashboardPort))) { finishPost(false, "TCP CONNECT FAILED"); return; }
   telemetryClient.setNoDelay(true);
   const String body = telemetryJson(millis());
-  httpRequest = String("POST /api/telemetry HTTP/1.1\r\nHost: ") + dashboardIp.toString() + ":" + dashboardPort +
+  httpRequest = String("POST /api/telemetry HTTP/1.1\r\nHost: ") + (DASHBOARD_TLS ? String("doppler-radar.onrender.com") : dashboardIp.toString() + ":" + dashboardPort) +
     "\r\nConnection: close\r\nContent-Type: application/json\r\nX-Device-Key: " + DEVICE_API_KEY +
     "\r\nContent-Length: " + body.length() + "\r\n\r\n" + body;
   httpOffset = 0;
@@ -443,7 +481,7 @@ void reportDiagnostics(uint32_t now) {
   static uint32_t lastTrackingLog = 0;
   if (uint32_t(now - lastTrackingLog) >= 1000) {
     lastTrackingLog = now;
-    for (uint8_t s = 0; s < 2; ++s) for (const auto &t : trackers[s].tracks)
+    for (uint8_t s = 0; s < 1; ++s) for (const auto &t : sharedTargets.tracker.tracks)
       if (t.present && t.moving) Serial.printf("[S%u-T%u] Tracking: %.2f m | displacement=%.2f m | %s\n",
         s + 1, t.id, t.filteredDistance / 1000, t.displacement() / 1000, t.directionName());
   }
@@ -526,6 +564,14 @@ void setup() {
   WiFi.setSleepMode(WIFI_NONE_SLEEP);
   dashboardAddressValid = dashboardIp.fromString(DASHBOARD_HOST);
   if (!dashboardAddressValid) Serial.println(F("[Dashboard] Waiting for automatic Wi-Fi discovery"));
+  if (DASHBOARD_TLS) {
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    secureTelemetryClient.setTrustAnchors(&dashboardTrust);
+    secureTelemetryClient.setSession(&dashboardSession);
+    tlsReady = true;
+
+
+  }
   bootAt = millis();
   statusSounds.begin(bootAt, ENABLE_BUZZER_SELF_TEST);
   if (ENABLE_BUZZER_SELF_TEST) Serial.println(F("[Buzzer] Startup: 3 rising notes; Wi-Fi connected: 2 high beeps; movement: alternating siren"));

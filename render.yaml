@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: doppler-radar
+    runtime: node
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    envVars:
+      - key: DOPPLER_DEVICE_KEY
+        sync: false
+      - key: DOPPLER_INITIAL_PASSWORD
+        sync: false
