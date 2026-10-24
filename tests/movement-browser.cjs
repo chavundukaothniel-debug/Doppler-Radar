@@ -15,7 +15,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
     await page.goto(base);await page.locator('[name=username]').fill('bench');await page.locator('[name=password]').fill(password);await page.locator('#loginForm button[type=submit]').click();
     await page.getByText('ESP8266 OFFLINE',{exact:true}).waitFor();assert.equal(await page.locator('.target-marker').count(),0);
     await post();interval=setInterval(()=>post().catch(e=>errors.push(e.message)),400);
-    await page.locator('.target-marker').nth(5).waitFor();assert.equal(await page.locator('.detection-card').count(),6);assert.equal(await page.locator('.range').count(),14);assert.equal(await page.locator('.coverage-zone').count(),2);assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
+    await page.locator('.target-marker').nth(5).waitFor();assert.equal(await page.locator('.detection-card').count(),6);assert.equal(await page.locator('.range').count(),7);assert.equal(await page.locator('.coverage-zone').count(),1);assert.equal(await page.locator('html').getAttribute('data-theme'),'light');
     assert.equal(await page.locator('.trail-layer').first().getAttribute('viewBox'),'0 0 100 60');
     await page.locator('#radarMode').selectOption('measured');
     assert.equal(await page.locator('#radarMode').inputValue(),'measured');
@@ -31,7 +31,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
     Object.assign(first,original);delete first.displayHoldMs;delete first.rawSpeedCmS;
     await post();await page.waitForFunction(()=>document.querySelectorAll('.target-marker.last-known').length===0);
     await page.locator('[data-page="Analytics"]').click();await page.getByText('Sensor activity',{exact:true}).waitFor();
-    await page.locator('[data-page="Settings"]').click();await page.getByText('800 mm',{exact:true}).waitFor();await page.locator('[data-page="Dashboard"]').click();
+    await page.locator('[data-page="Settings"]').click();await page.getByText('0.80 m',{exact:true}).waitFor();await page.locator('[data-page="Dashboard"]').click();
     clearInterval(interval);interval=null;
     await page.waitForFunction(()=>document.querySelectorAll('.target-marker').length===0,{},{timeout:5000});
     await page.waitForFunction(()=>document.getElementById('connectionStatus').textContent==='ESP8266 OFFLINE',{},{timeout:17000});
@@ -41,3 +41,4 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
     assert.deepEqual(errors,[]);console.log('PASS: six hardware-data fixtures, white theme, rings/FOV, progress, admin views, desktop/mobile, stale cleanup and hardware offline; no browser errors');
   }finally{if(interval)clearInterval(interval);if(browser)await browser.close();await new Promise(r=>app.server.close(r));}
 })().catch(e=>{console.error(e);process.exitCode=1;});
+

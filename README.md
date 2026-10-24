@@ -94,3 +94,11 @@ Firmware 2026-10-24.3 reduces the UART receive allocation to 4096 bytes, Softwar
 ## Required Arduino memory setting for HTTPS
 
 Before uploading NodeMCU firmware 2026-10-24.4 or newer, select Tools > MMU > 16KB cache + 48KB IRAM and 2nd Heap (shared). The ESP8266 BearSSL allocator prefers this additional heap for TLS input/output buffers, leaving ordinary RAM for certificate validation and tracking. HTTPS builds intentionally fail with a descriptive error if this setting is absent. Local HTTP builds do not require it. Telemetry JSON is constructed before the TLS handshake, checked for allocation failures, and transmitted in separate header/body buffers without duplicating the full body. The firmware defers connections if ordinary RAM is critically low. This prevents a known certificate-validator allocation failure; real connection success still requires checking the device log.
+
+## Combined dashboard coverage view
+
+The dashboard and Live Radar pages now show one large shared radar instead of two panels. Shared telemetry IDs are plotted once, with per-sensor health retained below. The display uses a common approximate origin because mounting offsets are not calibrated.
+
+Ai-Thinker specifies horizontal azimuth +/-60 degrees (120 degrees total): https://en.ai-thinker.com/Uploads/file/20231016/20231016032622_13559.pdf . Parallel side-by-side sensors keep this nominal angular coverage. Using 0.10 m as the upper bound on their separation, at forward depth y = R/2 the ideal-sector union has width W = 2*y*tan(60 degrees)+0.10. The midpoint angular span at this plane is 2*atan(W/(2*y)). For R=7 m, y=3.50 m, W=12.22 m, and span approximately 120.4 degrees. This is a geometric upper-bound estimate, not measured usable coverage; actual spacing, installation and casing affect detection. The existing software range limit remains 7 m.
+
+Validated with all 27 Node tests and desktop/mobile browser fixtures, including six objects, one shared field, direction arrows, zoom, stale cleanup and offline recovery.

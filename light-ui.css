@@ -47,3 +47,14 @@
 .radar-reading{display:grid;grid-template-columns:1fr 1.4fr;gap:5px;text-align:left}
 .radar-reading span:last-child{text-align:right}
 @media(max-width:760px){.radar-grid,.full-radar .radar-grid{width:100%;margin:24px auto 20px}.radar-controls{gap:8px}.radar-controls label{min-width:65px}.radar-controls .select-control{flex:1;min-width:130px}}
+
+/* One shared field for the co-facing sensor pair. */
+.radar-wrap.combined-radar{grid-template-columns:minmax(0,1fr);padding:24px 28px;min-height:0}
+.combined-radar .sensor-field{min-width:0;border:0;padding:0}
+.combined-radar .radar-grid,.full-radar .combined-radar .radar-grid{max-width:1000px;width:100%;margin:30px auto 28px}
+.dashboard-grid{grid-template-columns:minmax(0,1fr)}
+.coverage-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0}
+.coverage-summary>div{padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--surface-subtle)}
+.coverage-summary strong{display:block;font-size:22px;color:var(--accent)}
+.coverage-summary span{display:block;margin-top:5px;font-size:11px;line-height:1.6;color:var(--muted)}
+@media(max-width:760px){.radar-wrap.combined-radar{padding:20px 10px}.coverage-summary{grid-template-columns:1fr}.coverage-summary>div{padding:10px 14px}.coverage-summary strong{font-size:18px}.combined-radar .sensor-field h3{font-size:12px}}

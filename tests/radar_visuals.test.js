@@ -3,7 +3,7 @@ const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 function load(){
   const context=vm.createContext({document:{addEventListener(){}},Date});
   const source=fs.readFileSync(path.join(__dirname,'../light-ui.js'),'utf8');
-  vm.runInContext(source.replace(/\}\)\(\);\s*$/,'globalThis.radarTest={radarVector,radar,state,targetDirection,rememberPositions,plotTarget};})();'),context);
+  vm.runInContext(source.replace(/\}\)\(\);\s*$/,'globalThis.radarTest={coverageEstimate,radarVector,radar,state,targetDirection,rememberPositions,plotTarget};})();'),context);
   return context.radarTest;
 }
 test('qualified direction arrows point toward or away from the sensor origin',()=>{
@@ -75,4 +75,19 @@ test('qualified tracks render red SVG arrows and zoom keeps distant returns in t
   assert.match(zoom,/2\.00 m/);
   assert.match(zoom,/1 returns outside view/);
   assert.match(zoom,/0\.25 m/);
+});
+
+test('co-facing sensors use one shared field and retain objects from either sensor',()=>{
+  const {radar,state,coverageEstimate}=load();
+  state.telemetry={connected:true,system:{esp:true},sensors:[{id:1,online:true},{id:2,online:true}],targets:[{sensorId:2,targetId:'T2',x:0,y:2,distance:2,speed:0,direction:'STATIONARY',moving:false}]};
+  const html=radar();
+  assert.equal((html.match(/class="sensor-field"/g)||[]).length,1);
+  assert.equal((html.match(/class="coverage-zone"/g)||[]).length,1);
+  assert.match(html,/2\/2 SENSORS ONLINE/);
+  assert.match(html,/T2/);
+  const estimate=coverageEstimate(7);
+  assert.ok(Math.abs(estimate.width-(7*Math.sqrt(3)+0.1))<1e-9);
+  assert.ok(estimate.angle>120 && estimate.angle<121);
+  assert.ok(Math.abs(coverageEstimate(7,0).angle-120)<1e-9);
+  assert.match(html,/geometric guide/);
 });
