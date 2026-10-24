@@ -53,7 +53,7 @@ uint32_t unoLinkOverflows = 0;
 AlarmLogic alarm;
 BuzzerOutput buzzer(BUZZER_PIN);
 StatusSounds statusSounds;
-constexpr char FIRMWARE_VERSION[] = "2026-10-24.1";
+constexpr char FIRMWARE_VERSION[] = "2026-10-24.2";
 uint8_t radarRxTail[16]{}, radarRxTailIndex = 0;
 uint32_t bootAt = 0;
 volatile uint32_t unoRiseUs = 0;
@@ -463,8 +463,24 @@ void serviceTelemetry(uint32_t now) {
   if (postAttempted && uint32_t(now - lastPostAt) < (!DASHBOARD_TLS && telemetryDirty && dashboardConnected ? 100UL : interval)) return;
   postAttempted = true;
   lastPostAt = now;
-  telemetryClient.setTimeout(DASHBOARD_TLS ? 5000 : 200);
-  if (!(DASHBOARD_TLS ? telemetryClient.connect("doppler-radar.onrender.com", 443) : telemetryClient.connect(dashboardIp, dashboardPort))) { finishPost(false, "TCP CONNECT FAILED"); return; }
+  telemetryClient.setTimeout(DASHBOARD_TLS ? 15000 : 200);
+  if (DASHBOARD_TLS) {
+    IPAddress resolved;
+    if (!WiFi.hostByName("doppler-radar.onrender.com",resolved,5000)) {
+      Serial.println(F("[Dashboard] DNS failed: hotspot cannot resolve doppler-radar.onrender.com"));
+      finishPost(false,"DNS FAILED"); return;
+    }
+    Serial.printf("[Dashboard] HTTPS connecting: IP=%s heap=%u largestBlock=%u UTC=%lu\n",
+      resolved.toString().c_str(),ESP.getFreeHeap(),ESP.getMaxFreeBlockSize(),static_cast<unsigned long>(time(nullptr)));
+    if (!secureTelemetryClient.connect("doppler-radar.onrender.com",443)) {
+      char detail[160]{};
+      const int error=secureTelemetryClient.getLastSSLError(detail,sizeof(detail));
+      Serial.printf("[Dashboard] HTTPS failed: TLS error=%d detail=%s heap=%u\n",error,detail,ESP.getFreeHeap());
+      finishPost(false,"HTTPS CONNECT FAILED"); return;
+    }
+  } else if (!plainTelemetryClient.connect(dashboardIp,dashboardPort)) {
+    finishPost(false,"TCP CONNECT FAILED"); return;
+  }
   telemetryClient.setNoDelay(true);
   const String body = telemetryJson(millis());
   httpRequest = String("POST /api/telemetry HTTP/1.1\r\nHost: ") + (DASHBOARD_TLS ? String("doppler-radar.onrender.com") : dashboardIp.toString() + ":" + dashboardPort) +
