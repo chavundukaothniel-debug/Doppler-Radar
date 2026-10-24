@@ -243,7 +243,7 @@ function appendEvents(previous, current, events) {
     if (target.alarmQualified && !old?.alarmQualified) next.unshift({ timestamp: now, type: 'MOVEMENT THRESHOLD',
       sensorId: target.sensorId, direction: target.direction, distance: target.distance, speed: target.speed,
       displacementMm: target.displacementMm, event: `${target.targetId}: ${(Math.abs(target.displacementMm)/1000).toFixed(2)} m movement; ${target.direction}.`, status: 'ALERT' });
-    if (old && target.direction !== old.direction) next.unshift({ timestamp: now, type: 'TARGET DIRECTION',
+    if (old && target.direction !== old.direction && (target.moving || old.moving)) next.unshift({ timestamp: now, type: 'TARGET DIRECTION',
       sensorId: target.sensorId, direction: target.direction,
       event: `${target.targetId}: ${target.direction}.`, status: 'MONITORING' });
     if (old && target.displacementMm !== null && !target.alarmQualified &&
@@ -275,11 +275,11 @@ function publicTelemetry(state, events) {
   const online = Boolean(state.lastData && Date.now() - Date.parse(state.lastData) <= HARDWARE_ONLINE_MS);
   const age = state.lastData ? Math.max(0, Date.now() - Date.parse(state.lastData)) : Infinity;
   const targets = online ? state.targets.filter(t => (t.lastSeenAgeMs || 0) + age < (t.displayHoldMs || 1200) &&
-    state.sensors.some(s => s.id === t.sensorId && s.online && (s.lastFrameAgeMs || 0) + age < SENSOR_HEALTH_MS))
+    state.sensors.some(s => (state.sharedScene || s.id === t.sensorId) && s.online && (s.lastFrameAgeMs || 0) + age < SENSOR_HEALTH_MS))
     .map(t => {
       const measurementAge = (t.lastSeenAgeMs || 0) + age;
       return {...t, lastSeenAgeMs:measurementAge, displayState:measurementAge >= 1200 ? 'LAST_KNOWN' : 'LIVE',
-        ...(measurementAge >= 1200 ? {moving:false, alarmQualified:false, direction:'STATIONARY'} : {})};
+        ...(measurementAge >= 1200 ? {moving:false, alarmQualified:false, direction:'TRACKING'} : {})};
     }) : [];
   return {
     ...state,
@@ -289,7 +289,7 @@ function publicTelemetry(state, events) {
     gsm: { ...state.gsm, connected: online && state.gsm.connected, network: online && state.gsm.network },
     sensors: state.sensors.map((sensor) => ({ ...sensor,
       lastFrameAgeMs: sensor.lastFrameAgeMs === null ? null : Math.min(60000, (sensor.lastFrameAgeMs || 0) + age),
-      targetCount: targets.filter(t => t.sensorId === sensor.id).length,
+      targetCount: state.sharedScene ? (online && sensor.online ? sensor.targetCount : 0) : targets.filter(t => t.sensorId === sensor.id).length,
       online: sensor.mode === 'trigger' ? null : online && sensor.online && (sensor.lastFrameAgeMs || 0) + age < SENSOR_HEALTH_MS,
       linkOnline: sensor.mode === 'linked' ? online && sensor.linkOnline && (sensor.lastFrameAgeMs || 0) + age < SENSOR_HEALTH_MS : sensor.linkOnline,
       triggerActive: online && sensor.triggerActive, detectionActive: online && sensor.detectionActive })),
@@ -306,6 +306,7 @@ function createApp(options = {}) {
   const deviceKey = options.deviceKey ?? process.env.DOPPLER_DEVICE_KEY ?? '';
   const sessions = new Map();
   const recorder = require('./recordings').createRecorder(root);
+  const filterCloudScene = require('./scene-filter').createSceneFilter();
   let liveTelemetry = telemetryState();
   let events = store.loadEvents();
 
@@ -346,7 +347,15 @@ function createApp(options = {}) {
         const expected = Buffer.from(deviceKey), actual = Buffer.from(String(req.headers['x-device-key'] || ''));
         if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) return sendJson(res, 401, { error: 'Invalid device credential.' });
         const payload = await readJson(req);
+        if (Number(payload.sequence)>0 && payload.deviceId===liveTelemetry.deviceId &&
+            Number(payload.sequence)===liveTelemetry.system.sequence && Number(payload.uptimeSeconds)>=liveTelemetry.system.uptimeSeconds) {
+          return sendJson(res,202,{accepted:true,duplicate:true,sequence:liveTelemetry.system.sequence});
+        }
         const next = normalizeTelemetry(payload, liveTelemetry, new Date().toISOString());
+        if (Array.isArray(payload.sharedTargets)) {
+          next.sharedScene = true;
+          filterCloudScene(next);
+        }
         recorder.append(payload, next);
         const updatedEvents = appendEvents(liveTelemetry, next, events);
         if (updatedEvents[0] !== events[0]) store.saveEvents(updatedEvents);
