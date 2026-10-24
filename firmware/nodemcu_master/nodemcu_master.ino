@@ -53,7 +53,7 @@ uint32_t unoLinkOverflows = 0;
 AlarmLogic alarm;
 BuzzerOutput buzzer(BUZZER_PIN);
 StatusSounds statusSounds;
-constexpr char FIRMWARE_VERSION[] = "2026-10-24.2";
+constexpr char FIRMWARE_VERSION[] = "2026-10-24.3";
 uint8_t radarRxTail[16]{}, radarRxTailIndex = 0;
 uint32_t bootAt = 0;
 volatile uint32_t unoRiseUs = 0;
@@ -557,8 +557,9 @@ void setup() {
   digitalWrite(ALERT_LED_PIN, HIGH);
   digitalWrite(GREEN_LED_PIN, LOW);
   buzzer.begin();
-  // Hold >200 ms of continuous 256000-baud input during a TCP connection attempt.
-  Serial.setRxBufferSize(8192);
+  // Bound RX allocations so verified TLS has room for its full receive record.
+  // TLS handshakes can still cause missing frames; never infer motion through gaps.
+  Serial.setRxBufferSize(4096);
   Serial.begin(RADAR_BAUD);
   Serial.setDebugOutput(false);
   Serial.printf("\nDoppler master firmware %s: Radar UART 256000, buzzer GPIO14 rapid two-tone siren\n", FIRMWARE_VERSION);
@@ -566,11 +567,11 @@ void setup() {
   unoHigh = digitalRead(UNO_TRIGGER_PIN) == HIGH;
   unoRiseUs = micros();
   attachInterrupt(digitalPinToInterrupt(UNO_TRIGGER_PIN), unoEdge, CHANGE);
-  gsmSerial.begin(GSM_BAUD, SWSERIAL_8N1, GSM_RX_PIN, GSM_TX_PIN, false, 256, 1024);
+  gsmSerial.begin(GSM_BAUD, SWSERIAL_8N1, GSM_RX_PIN, GSM_TX_PIN, false, 256, 256);
   // Protect each 9600-baud TX byte from ordinary interrupt jitter (~1 ms).
   // The waveform NMI remains active; RX is serviced between transmitted bytes.
   gsmSerial.enableIntTx(false);
-  unoSerial.begin(LINK_BAUD, SWSERIAL_8N1, UNO_DATA_PIN, -1, false, 128, 1024);
+  unoSerial.begin(LINK_BAUD, SWSERIAL_8N1, UNO_DATA_PIN, -1, false, 128, 256);
   unoSerial.enableRxGPIOPullUp(false);
   gsm.begin(millis());
   WiFi.persistent(false);
@@ -581,6 +582,8 @@ void setup() {
   if (!dashboardAddressValid) Serial.println(F("[Dashboard] Waiting for automatic Wi-Fi discovery"));
   if (DASHBOARD_TLS) {
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    // Full-size TLS receive records preserve compatibility without disabling validation.
+    secureTelemetryClient.setBufferSizes(16384,512);
     secureTelemetryClient.setTrustAnchors(&dashboardTrust);
     secureTelemetryClient.setSession(&dashboardSession);
     tlsReady = true;

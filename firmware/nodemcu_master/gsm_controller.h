@@ -54,8 +54,8 @@ class GsmController {
   void queueAlert(uint8_t sources, uint32_t now) { pendingSources |= sources; pendingAt = now; }
   bool queueMovement(uint8_t sensor, uint16_t target, const char *direction,
                      uint16_t distance, uint16_t movement, uint32_t now, const char *summary = nullptr) {
-    if (movementCount >= 6) return false;
-    Movement &m = movements[(movementHead + movementCount++) % 6];
+    if (movementCount >= movementCapacity) return false;
+    Movement &m = movements[(movementHead + movementCount++) % movementCapacity];
     m.sensor = sensor; m.target = target; m.distance = distance;
     m.displacement = movement; m.at = now;
     snprintf(m.direction, sizeof(m.direction), "%s", direction);
@@ -115,7 +115,7 @@ class GsmController {
     }
     if (!pendingSources && movementCount) {
       pendingMovement = movements[movementHead];
-      movementHead = (movementHead + 1) % 6; --movementCount;
+      movementHead = (movementHead + 1) % movementCapacity; --movementCount;
       queueAlert(pendingMovement.sensor, pendingMovement.at);
     }
     if (pendingSources && uint32_t(now - pendingAt) > 60000) {
@@ -212,7 +212,9 @@ class GsmController {
     char direction[16]{};
     char summary[576]{};
   };
-  Movement movements[6], pendingMovement, activeMovement;
+  // Each entry holds a complete six-object scene; apply backpressure when full.
+  static constexpr uint8_t movementCapacity = 2;
+  Movement movements[movementCapacity], pendingMovement, activeMovement;
   uint8_t movementHead = 0, movementCount = 0;
   uint16_t summaryOffset = 0;
   const char *phone;
@@ -446,3 +448,4 @@ class GsmController {
     }
   }
 };
+

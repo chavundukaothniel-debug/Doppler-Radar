@@ -1,6 +1,6 @@
 # Doppler Radar System
 
-University engineering prototype using two RD-03D sensors, an Arduino Uno and an ESP8266 NodeMCU. Current active firmware: **2026-10-24.1**.
+University engineering prototype using two RD-03D sensors, an Arduino Uno and an ESP8266 NodeMCU. Current active firmware: **2026-10-24.3**.
 
 ## Published dashboard (Render)
 
@@ -86,3 +86,7 @@ Software compilation and regressions do not prove physical radar accuracy, audib
 ## Backup scope
 
 This repository contains the active firmware, GSM diagnostic, dashboard, source documentation, launcher and tests. Unused legacy ESP32 firmware/configuration, the old unused dashboard security script, machine shortcuts, private credentials, runtime accounts/events/recordings and generated build files are excluded. Existing Git history is preserved.
+
+## HTTPS memory update (24 October)
+
+Firmware 2026-10-24.3 reduces the UART receive allocation to 4096 bytes, SoftwareSerial edge queues to 256 entries each, and pending scene queue to two complete scenes. A full queue returns false so unqueued targets retry. This frees approximately 12 KiB versus the prior firmware for TLS buffers. Each scene still includes up to six unique objects. Certificate and hostname verification remain enabled, with full 16 KiB TLS receive records. Actual free heap and secure connection success must be checked on the powered device. Synchronous handshakes can overflow serial queues; frames with gaps must be reacquired rather than interpreted as movement.
