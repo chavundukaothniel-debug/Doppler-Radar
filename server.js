@@ -8,7 +8,9 @@ const MAX_BODY_BYTES = 32 * 1024;
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const HARDWARE_ONLINE_MS = 15 * 1000;
 const SENSOR_HEALTH_MS = 5000;
-const MAX_EVENTS = 300;
+const { MAX_EVENTS, EVENT_TYPES, readFilters, filterRows } = require('./history');
+const { createResults, summarize, SCENARIOS } = require('./test-results');
+const { historyPdf, resultsPdf } = require('./reports');
 
 function ensureDirectory(directory) {
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -237,18 +239,19 @@ function appendEvents(previous, current, events) {
   if (!previous.connected) next.unshift({ timestamp: now, type: 'HARDWARE', event: 'Controller telemetry connection established.', status: 'ONLINE' });
   current.targets.forEach((target) => {
     const old = previous.targets.find(t => t.targetId === target.targetId && t.sensorId === target.sensorId);
-    if (!old) next.unshift({ timestamp: now, type: 'TARGET DETECTION', sensorId: target.sensorId,
+    const sensorId = current.sharedScene ? 'Combined' : target.sensorId;
+    if (!old) next.unshift({ timestamp: now, type: 'TARGET DETECTION', sensorId,
       direction: target.direction, distance: target.distance, speed: target.speed,
-      event: `${target.targetId} detected on Sensor ${target.sensorId}: ${target.direction}.`, status: 'MONITORING' });
+      event: `${target.targetId} detected on ${current.sharedScene ? 'combined view' : 'Sensor ' + target.sensorId}: ${target.direction}.`, status: 'MONITORING' });
     if (target.alarmQualified && !old?.alarmQualified) next.unshift({ timestamp: now, type: 'MOVEMENT THRESHOLD',
-      sensorId: target.sensorId, direction: target.direction, distance: target.distance, speed: target.speed,
+      sensorId, direction: target.direction, distance: target.distance, speed: target.speed,
       displacementMm: target.displacementMm, event: `${target.targetId}: ${(Math.abs(target.displacementMm)/1000).toFixed(2)} m movement; ${target.direction}.`, status: 'ALERT' });
     if (old && target.direction !== old.direction && (target.moving || old.moving)) next.unshift({ timestamp: now, type: 'TARGET DIRECTION',
-      sensorId: target.sensorId, direction: target.direction,
+      sensorId, direction: target.direction,
       event: `${target.targetId}: ${target.direction}.`, status: 'MONITORING' });
     if (old && target.displacementMm !== null && !target.alarmQualified &&
         Math.floor(Math.abs(target.displacementMm)/200) > Math.floor(Math.abs(old.displacementMm || 0)/200))
-      next.unshift({ timestamp: now, type: 'MOVEMENT TRACKING', sensorId: target.sensorId,
+      next.unshift({ timestamp: now, type: 'MOVEMENT TRACKING', sensorId,
         displacementMm: target.displacementMm, direction: target.direction,
         event: `${target.targetId}: ${(Math.abs(target.displacementMm)/1000).toFixed(2)} m / 0.80 m; ${target.direction}.`, status: 'MONITORING' });
   });
@@ -307,6 +310,7 @@ function createApp(options = {}) {
   const deviceKey = options.deviceKey ?? process.env.DOPPLER_DEVICE_KEY ?? '';
   const sessions = new Map();
   const recorder = require('./recordings').createRecorder(root);
+  const results = createResults(root);
   const filterCloudScene = require('./scene-filter').createSceneFilter();
   let liveTelemetry = telemetryState();
   let events = store.loadEvents();
@@ -364,6 +368,38 @@ function createApp(options = {}) {
         return sendJson(res, 202, { accepted: true, sequence: liveTelemetry.system.sequence });
       }
       if (req.method === 'GET' && url.pathname === '/api/telemetry') { if (!requireUser(req, res)) return; return sendJson(res, 200, publicTelemetry(liveTelemetry, events)); }
+      if (req.method === 'GET' && ['/api/history', '/api/history.pdf'].includes(url.pathname)) {
+        if (!requireUser(req, res)) return;
+        const filters = readFilters(url.searchParams), rows = filterRows(events, filters);
+        if (url.pathname.endsWith('.pdf')) {
+          const pdf = historyPdf(rows, filters, events.length, MAX_EVENTS);
+          res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="radar-history.pdf"', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+          return res.end(pdf);
+        }
+        const offset = Number(url.searchParams.get('offset') || 0);
+        if (!Number.isSafeInteger(offset) || offset < 0) throw Error('Invalid history page.');
+        return sendJson(res, 200, { events: rows.slice(offset, offset + 100), total: rows.length, retained: events.length, limit: MAX_EVENTS, oldest: events.length ? events.reduce((oldest, row) => row.timestamp < oldest ? row.timestamp : oldest, events[0].timestamp) : null, types: EVENT_TYPES });
+      }
+      if (req.method === 'GET' && ['/api/test-results', '/api/test-results.pdf'].includes(url.pathname)) {
+        if (!requireUser(req, res)) return;
+        const filters = readFilters(url.searchParams);
+        if (filters.type) throw Error('Event type does not apply to test results.');
+        const rows = filterRows(results.list(), filters, 'performedAt');
+        if (url.pathname.endsWith('.pdf')) {
+          const pdf = resultsPdf(rows, filters);
+          res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="radar-test-results.pdf"', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+          return res.end(pdf);
+        }
+        return sendJson(res, 200, { results: rows, summary: summarize(rows), scenarios: SCENARIOS });
+      }
+      const resultMatch = url.pathname.match(/^\/api\/test-results\/([a-f0-9-]{36})$/);
+      if ((req.method === 'POST' && url.pathname === '/api/test-results') || (req.method === 'PATCH' && resultMatch)) {
+        const user = requireUser(req, res); if (!user) return;
+        if (user.role === 'Viewer') return sendJson(res, 403, { error: 'Operator permission required.' });
+        const body = await readJson(req);
+        const result = results.save(body, user, resultMatch?.[1]);
+        return sendJson(res, req.method === 'POST' ? 201 : 200, { result });
+      }
       if (url.pathname === '/api/recordings') {
         if (!requireUser(req,res)) return;
         if (req.method === 'GET') return sendJson(res,200,recorder.status());
@@ -408,6 +444,7 @@ function createApp(options = {}) {
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) return serveFile(res, 'doppler-radar-dashboard.html', 'text/html; charset=utf-8');
       if (req.method === 'GET' && url.pathname === '/light-ui.css') return serveFile(res, 'light-ui.css', 'text/css; charset=utf-8');
       if (req.method === 'GET' && url.pathname === '/light-ui.js') return serveFile(res, 'light-ui.js', 'application/javascript; charset=utf-8');
+      if (req.method === 'GET' && url.pathname === '/history-ui.js') return serveFile(res, 'history-ui.js', 'application/javascript; charset=utf-8');
       sendJson(res, 404, { error: 'Not found.' });
     } catch (error) { sendJson(res, 400, { error: error.message || 'Bad request.' }); }
   });

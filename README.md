@@ -62,6 +62,12 @@ Install ArduinoJson 7.x and EspSoftwareSerial for the NodeMCU. See [firmware wir
 
 See [the current tracking update](TRACKING_UPDATE.md) for physical tests and limitations. [HANDOVER.md](HANDOVER.md) preserves the earlier restoration record; later update notes supersede historical behavior.
 
+## History PDF downloads and test results
+
+**Event History** (or **Alerts** for Viewers) now filters all retained events by local start/end date and time, event type and sensor reference, with a direct **Download PDF** button. Reports include every match across screen pages. The latest 10,000 events are retained; older events previously discarded are unavailable.
+
+Use **Recordings** to capture telemetry during a test, then **Test Results** to enter actual people counts, expected/observed alarms, paired distances, alarm delay, phone-confirmed SMS receipt and notes. The page includes a test checklist, saved-result editing, areas to improve, and a separate PDF report with time/sensor filters. See [the data collection guide](DATA_COLLECTION.md) for the full procedure and field examples. Restart the server and refresh the browser after this update. A public Render installation requires deploying the updated files and persistent data storage.
+
 ## Verification
 
 Node backend checks use built-in libraries:

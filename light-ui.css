@@ -49,6 +49,8 @@
 @media(max-width:760px){.radar-grid,.full-radar .radar-grid{width:100%;margin:24px auto 20px}.radar-controls{gap:8px}.radar-controls label{min-width:65px}.radar-controls .select-control{flex:1;min-width:130px}}
 
 /* One shared field for the co-facing sensor pair. */
+.report-filters,.trial-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.report-filters .field,.trial-fields .field{margin-top:0;letter-spacing:.02em}.report-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}.report-filters .report-actions{grid-column:1/-1}.report-primary{color:#fff;background:var(--accent)}.button:disabled{opacity:.5;cursor:default}.field textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface-subtle);color:var(--text);font:inherit;resize:vertical}.collection-guide{padding-left:24px;font-size:13px;line-height:1.8}.collection-guide li{margin:10px 0}.success-copy{color:var(--ok);font-size:13px}#resultSummary{min-width:0}#resultSummary .summary-grid{margin:18px 0}summary{cursor:pointer;font-weight:700;font-size:13px}#trialForm{scroll-margin-top:20px}.sidebar{overflow-y:auto}.sidebar-footer{padding-top:18px;flex-shrink:0}#trialForm>p,.panel>p{line-height:1.6;font-size:13px}.report-filters input{min-width:0;width:100%}
+@media(max-width:760px){.report-filters,.trial-fields{grid-template-columns:minmax(0,1fr)}.report-actions .button{flex:1}.field{min-width:0}}
 .radar-wrap.combined-radar{grid-template-columns:minmax(0,1fr);padding:24px 28px;min-height:0}
 .combined-radar .sensor-field{min-width:0;border:0;padding:0}
 .combined-radar .radar-grid,.full-radar .combined-radar .radar-grid{max-width:1000px;width:100%;margin:30px auto 28px}
